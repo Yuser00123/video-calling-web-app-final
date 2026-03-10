@@ -1,0 +1,223 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --foreground-rgb: 255, 255, 255;
+  --background-start-rgb: 15, 15, 26;
+  --background-end-rgb: 26, 26, 46;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  color: rgb(var(--foreground-rgb));
+  background: linear-gradient(
+    135deg,
+    rgb(var(--background-start-rgb)),
+    rgb(var(--background-end-rgb))
+  );
+  min-height: 100vh;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(108, 92, 231, 0.5);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(108, 92, 231, 0.8);
+}
+
+/* Glass effect */
+.glass {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.glass-dark {
+  background: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(15px);
+  -webkit-backdrop-filter: blur(15px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Gradient text */
+.gradient-text {
+  background: linear-gradient(135deg, #6C5CE7, #00D2FF, #00F5A0);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Glow button */
+.glow-btn {
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s ease;
+}
+
+.glow-btn::before {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  right: -2px;
+  bottom: -2px;
+  background: linear-gradient(135deg, #6C5CE7, #00D2FF, #00F5A0, #6C5CE7);
+  border-radius: inherit;
+  z-index: -1;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  background-size: 300% 300%;
+  animation: shimmer 3s linear infinite;
+}
+
+.glow-btn:hover::before {
+  opacity: 1;
+}
+
+.glow-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 40px rgba(108, 92, 231, 0.4);
+}
+
+/* Particle background */
+.particles {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 0;
+}
+
+.particle {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  background: rgba(108, 92, 231, 0.3);
+  border-radius: 50%;
+  animation: float 6s ease-in-out infinite;
+}
+
+/* Video container */
+.video-container {
+  position: relative;
+  border-radius: 16px;
+  overflow: hidden;
+  background: #1a1a2e;
+  transition: all 0.3s ease;
+}
+
+.video-container:hover {
+  transform: scale(1.02);
+  box-shadow: 0 8px 32px rgba(108, 92, 231, 0.3);
+}
+
+.video-container video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Chat message animation */
+.chat-message {
+  animation: slideUp 0.3s ease-out;
+}
+
+/* Ripple effect */
+.ripple {
+  position: relative;
+  overflow: hidden;
+}
+
+.ripple::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.2);
+  transform: translate(-50%, -50%);
+  transition: width 0.6s, height 0.6s;
+}
+
+.ripple:active::after {
+  width: 200px;
+  height: 200px;
+}
+
+/* Input styling */
+input:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(108, 92, 231, 0.5);
+}
+
+/* Badge pulse */
+.badge-pulse {
+  animation: pulseGlow 2s ease-in-out infinite;
+}
+
+/* Tooltip */
+.tooltip {
+  position: relative;
+}
+
+.tooltip::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%) translateY(-8px);
+  padding: 4px 12px;
+  background: rgba(0, 0, 0, 0.8);
+  color: white;
+  border-radius: 6px;
+  font-size: 12px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+.tooltip:hover::after {
+  opacity: 1;
+}
+
+@keyframes gradientMove {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+.animate-gradient {
+  background-size: 200% 200%;
+  animation: gradientMove 3s ease infinite;
+}
