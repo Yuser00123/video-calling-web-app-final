@@ -3,7 +3,19 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
-import MeetingRoom from './MeetingRoom';
+import dynamic from 'next/dynamic';
+
+const MeetingRoom = dynamic(() => import('./MeetingRoom'), {
+  ssr: false,
+  loading: () => (
+    <div className="min-h-screen flex items-center justify-center">
+      <div className="text-center">
+        <div className="w-12 h-12 border-4 border-accent border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+        <p className="text-white/50">Joining meeting...</p>
+      </div>
+    </div>
+  ),
+});
 
 export default function JoinRoom() {
   const [roomCode, setRoomCode] = useState('');
@@ -32,7 +44,7 @@ export default function JoinRoom() {
 
       if (data.exists) {
         setJoined(true);
-        toast.success(`Joining meeting as ${userName}...`);
+        toast.success('Joining meeting as ' + userName + '...');
       } else {
         toast.error('Room not found. Please check the room code.');
       }
@@ -71,11 +83,7 @@ export default function JoinRoom() {
         </div>
 
         <form onSubmit={handleJoin} className="space-y-5">
-          <motion.div
-            initial={{ x: -20, opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            transition={{ delay: 0.3 }}
-          >
+          <motion.div initial={{ x: -20, opacity: 0 }} animate={{ x: 0, opacity: 1 }} transition={{ delay: 0.3 }}>
             <label className="block text-sm font-medium text-white/70 mb-2">Room Code</label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -95,11 +103,7 @@ export default function JoinRoom() {
             </div>
           </motion.div>
 
-          <motion.div
-            initial={{ x: -20, opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            transition={{ delay: 0.4 }}
-          >
+          <motion.div initial={{ x: -20, opacity: 0 }} animate={{ x: 0, opacity: 1 }} transition={{ delay: 0.4 }}>
             <label className="block text-sm font-medium text-white/70 mb-2">Your Name</label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">

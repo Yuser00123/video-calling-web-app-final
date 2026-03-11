@@ -4,21 +4,19 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
-import AgoraRTC from 'agora-rtc-sdk-ng';
 import VideoPlayer from './VideoPlayer';
 import Controls from './Controls';
 import ChatPanel from './ChatPanel';
 import ParticipantList from './ParticipantList';
-
-AgoraRTC.setLogLevel(3);
 
 export default function MeetingRoom({ isAdmin, roomCode: propRoomCode, userName: propUserName }) {
   const router = useRouter();
   const [roomCode, setRoomCode] = useState(propRoomCode || '');
   const [meetingActive, setMeetingActive] = useState(!!propRoomCode);
   const [creating, setCreating] = useState(false);
+  const [agoraReady, setAgoraReady] = useState(false);
 
-  // Agora state
+  const agoraRef = useRef(null);
   const clientRef = useRef(null);
   const localAudioTrackRef = useRef(null);
   const localVideoTrackRef = useRef(null);
@@ -27,20 +25,31 @@ export default function MeetingRoom({ isAdmin, roomCode: propRoomCode, userName:
   const [remoteUsers, setRemoteUsers] = useState([]);
   const [participants, setParticipants] = useState([]);
 
-  // Controls
   const [isMicOn, setIsMicOn] = useState(true);
   const [isCamOn, setIsCamOn] = useState(false);
   const [showChat, setShowChat] = useState(false);
   const [showParticipants, setShowParticipants] = useState(false);
 
-  // Chat state using Agora RTM-like approach via data channels
   const [messages, setMessages] = useState([]);
-  const [chatInput, setChatInput] = useState('');
-
-  // Participant names mapping
   const participantNamesRef = useRef({});
-
   const displayName = isAdmin ? 'Admin' : propUserName || 'User';
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const loadAgora = async () => {
+      try {
+        const AgoraRTC = (await import('agora-rtc-sdk-ng')).default;
+        AgoraRTC.setLogLevel(3);
+        agoraRef.current = AgoraRTC;
+        setAgoraReady(true);
+      } catch (err) {
+        console.error('Failed to load Agora:', err);
+        toast.error('Failed to load video SDK');
+      }
+    };
+    loadAgora();
+  }, []);
 
   const createMeeting = async () => {
     setCreating(true);
@@ -55,7 +64,7 @@ export default function MeetingRoom({ isAdmin, roomCode: propRoomCode, userName:
       if (data.success) {
         setRoomCode(data.roomCode);
         setMeetingActive(true);
-        toast.success(`Meeting created! Code: ${data.roomCode}`);
+        toast.success('Meeting created! Code: ' + data.roomCode);
       }
     } catch (error) {
       toast.error('Failed to create meeting');
@@ -65,7 +74,9 @@ export default function MeetingRoom({ isAdmin, roomCode: propRoomCode, userName:
   };
 
   const joinChannel = useCallback(async () => {
-    if (!roomCode) return;
+    if (!roomCode || !agoraRef.current) return;
+
+    const AgoraRTC = agoraRef.current;
 
     try {
       const client = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
@@ -73,7 +84,6 @@ export default function MeetingRoom({ isAdmin, roomCode: propRoomCode, userName:
 
       const uid = isAdmin ? 1 : Math.floor(Math.random() * 100000) + 2;
 
-      // Get token from server
       const tokenRes = await fetch('/api/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -91,22 +101,16 @@ export default function MeetingRoom({ isAdmin, roomCode: propRoomCode, userName:
 
       const appId = process.env.NEXT_PUBLIC_AGORA_APP_ID;
 
-      // Setup event handlers before joining
       client.on('user-published', async (user, mediaType) => {
         await client.subscribe(user, mediaType);
-
         if (mediaType === 'video') {
           setRemoteUsers((prev) => {
-            const exists = prev.find((u) => u.uid === user.uid);
-            if (exists) {
-              return prev.map((u) => (u.uid === user.uid ? { ...u, videoTrack: user.videoTrack } : u));
-            }
-            return [...prev, { uid: user.uid, videoTrack: user.videoTrack, audioTrack: user.audioTrack }];
+            const filtered = prev.filter((u) => u.uid !== user.uid);
+            return [...filtered, { uid: user.uid, videoTrack: user.videoTrack, audioTrack: user.audioTrack }];
           });
         }
-
         if (mediaType === 'audio') {
-          user.audioTrack?.play();
+          if (user.audioTrack) user.audioTrack.play();
           setRemoteUsers((prev) =>
             prev.map((u) => (u.uid === user.uid ? { ...u, audioTrack: user.audioTrack } : u))
           );
@@ -123,41 +127,29 @@ export default function MeetingRoom({ isAdmin, roomCode: propRoomCode, userName:
 
       client.on('user-joined', (user) => {
         setRemoteUsers((prev) => {
-          const exists = prev.find((u) => u.uid === user.uid);
-          if (!exists) {
+          if (!prev.find((u) => u.uid === user.uid)) {
             return [...prev, { uid: user.uid, videoTrack: null, audioTrack: null }];
           }
           return prev;
         });
-        toast.info(`A user joined the meeting`);
+        toast.info('A user joined the meeting');
       });
 
       client.on('user-left', (user) => {
         setRemoteUsers((prev) => prev.filter((u) => u.uid !== user.uid));
-        toast.info(`A user left the meeting`);
+        toast.info('A user left the meeting');
       });
-
-      // Handle custom messages via stream-message for chat
-      client.enableDualStream && await client.enableDualStream?.().catch(() => {});
 
       await client.join(appId, roomCode, tokenData.token, uid);
       setLocalUid(uid);
 
-      // Create audio track (mic on by default)
       const audioTrack = await AgoraRTC.createMicrophoneAudioTrack();
       localAudioTrackRef.current = audioTrack;
-
-      // Publish audio
       await client.publish([audioTrack]);
 
-      // Send name info via a channel message approach
-      // We'll use the Agora stream message for chat
-      // Enable data streams
       try {
         const dataStreamId = await client.createDataStream({ reliable: false, ordered: true });
         clientRef.current._dataStreamId = dataStreamId;
-
-        // Send user info
         const infoMsg = JSON.stringify({
           type: 'user-info',
           uid: uid,
@@ -166,7 +158,7 @@ export default function MeetingRoom({ isAdmin, roomCode: propRoomCode, userName:
         });
         client.sendStreamMessage(dataStreamId, new TextEncoder().encode(infoMsg));
       } catch (e) {
-        console.log('Data stream not supported, chat via state only');
+        console.log('Data stream setup:', e.message);
       }
 
       client.on('stream-message', (remoteUid, data) => {
@@ -181,7 +173,9 @@ export default function MeetingRoom({ isAdmin, roomCode: propRoomCode, userName:
             setParticipants((prev) => {
               const exists = prev.find((p) => p.uid === msg.uid);
               if (exists) {
-                return prev.map((p) => p.uid === msg.uid ? { ...p, name: msg.name, isAdmin: msg.isAdmin } : p);
+                return prev.map((p) =>
+                  p.uid === msg.uid ? { ...p, name: msg.name, isAdmin: msg.isAdmin } : p
+                );
               }
               return [...prev, { uid: msg.uid, name: msg.name, isAdmin: msg.isAdmin }];
             });
@@ -198,39 +192,47 @@ export default function MeetingRoom({ isAdmin, roomCode: propRoomCode, userName:
             toast.error('Meeting has been ended by admin');
             leaveChannel();
           }
-        } catch (e) {
-          // ignore
-        }
+        } catch (e) {}
       });
 
-      // Add self to participants
       setParticipants([{ uid, name: displayName, isAdmin }]);
       participantNamesRef.current[uid] = { name: displayName, isAdmin };
-
       toast.success('Joined the meeting!');
     } catch (error) {
       console.error('Error joining channel:', error);
-      toast.error('Failed to join the meeting. Check your connection.');
+      toast.error('Failed to join meeting. Check your connection.');
     }
   }, [roomCode, isAdmin, displayName]);
 
   useEffect(() => {
-    if (meetingActive && roomCode) {
+    if (meetingActive && roomCode && agoraReady) {
       joinChannel();
     }
+  }, [meetingActive, agoraReady, joinChannel]);
 
+  useEffect(() => {
     return () => {
-      leaveChannel();
+      if (localAudioTrackRef.current) {
+        localAudioTrackRef.current.close();
+        localAudioTrackRef.current = null;
+      }
+      if (localVideoTrackRef.current) {
+        localVideoTrackRef.current.close();
+        localVideoTrackRef.current = null;
+      }
+      if (clientRef.current) {
+        clientRef.current.leave().catch(() => {});
+        clientRef.current = null;
+      }
     };
-  }, [meetingActive]);
+  }, []);
 
-  // Periodically broadcast user info
   useEffect(() => {
     if (!clientRef.current || !localUid) return;
 
     const interval = setInterval(() => {
       try {
-        if (clientRef.current?._dataStreamId != null) {
+        if (clientRef.current && clientRef.current._dataStreamId != null) {
           const infoMsg = JSON.stringify({
             type: 'user-info',
             uid: localUid,
@@ -249,13 +251,18 @@ export default function MeetingRoom({ isAdmin, roomCode: propRoomCode, userName:
   }, [localUid, displayName, isAdmin]);
 
   const leaveChannel = async () => {
-    localAudioTrackRef.current?.close();
-    localVideoTrackRef.current?.close();
-    localAudioTrackRef.current = null;
-    localVideoTrackRef.current = null;
-
+    if (localAudioTrackRef.current) {
+      localAudioTrackRef.current.close();
+      localAudioTrackRef.current = null;
+    }
+    if (localVideoTrackRef.current) {
+      localVideoTrackRef.current.close();
+      localVideoTrackRef.current = null;
+    }
     if (clientRef.current) {
-      await clientRef.current.leave().catch(() => {});
+      try {
+        await clientRef.current.leave();
+      } catch (e) {}
       clientRef.current = null;
     }
 
@@ -281,7 +288,8 @@ export default function MeetingRoom({ isAdmin, roomCode: propRoomCode, userName:
 
   const toggleCam = async () => {
     const client = clientRef.current;
-    if (!client) return;
+    const AgoraRTC = agoraRef.current;
+    if (!client || !AgoraRTC) return;
 
     if (!isCamOn) {
       try {
@@ -314,12 +322,10 @@ export default function MeetingRoom({ isAdmin, roomCode: propRoomCode, userName:
       isAdmin,
     };
 
-    // Add to local messages
     setMessages((prev) => [...prev, msg]);
 
-    // Send via data stream
     try {
-      if (clientRef.current?._dataStreamId != null) {
+      if (clientRef.current && clientRef.current._dataStreamId != null) {
         clientRef.current.sendStreamMessage(
           clientRef.current._dataStreamId,
           new TextEncoder().encode(JSON.stringify(msg))
@@ -332,13 +338,13 @@ export default function MeetingRoom({ isAdmin, roomCode: propRoomCode, userName:
 
   const forceMuteUser = (targetUid) => {
     try {
-      if (clientRef.current?._dataStreamId != null) {
+      if (clientRef.current && clientRef.current._dataStreamId != null) {
         const msg = JSON.stringify({ type: 'force-mute', targetUid });
         clientRef.current.sendStreamMessage(
           clientRef.current._dataStreamId,
           new TextEncoder().encode(msg)
         );
-        toast.success(`User has been muted`);
+        toast.success('User has been muted');
       }
     } catch (e) {
       toast.error('Failed to mute user');
@@ -347,14 +353,13 @@ export default function MeetingRoom({ isAdmin, roomCode: propRoomCode, userName:
 
   const kickUser = (targetUid) => {
     try {
-      if (clientRef.current?._dataStreamId != null) {
+      if (clientRef.current && clientRef.current._dataStreamId != null) {
         const msg = JSON.stringify({ type: 'kick', targetUid });
         clientRef.current.sendStreamMessage(
           clientRef.current._dataStreamId,
           new TextEncoder().encode(msg)
         );
-        toast.success(`User has been removed`);
-        // Also remove from local state
+        toast.success('User has been removed');
         setRemoteUsers((prev) => prev.filter((u) => u.uid !== targetUid));
       }
     } catch (e) {
@@ -364,8 +369,7 @@ export default function MeetingRoom({ isAdmin, roomCode: propRoomCode, userName:
 
   const endMeeting = async () => {
     try {
-      // Notify all users
-      if (clientRef.current?._dataStreamId != null) {
+      if (clientRef.current && clientRef.current._dataStreamId != null) {
         const msg = JSON.stringify({ type: 'end-meeting' });
         clientRef.current.sendStreamMessage(
           clientRef.current._dataStreamId,
@@ -373,14 +377,12 @@ export default function MeetingRoom({ isAdmin, roomCode: propRoomCode, userName:
         );
       }
 
-      // End room on server
       await fetch('/api/room', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'end', roomCode }),
       });
 
-      // Wait a moment for message to send
       setTimeout(() => {
         leaveChannel();
         toast.success('Meeting ended for all participants');
@@ -391,16 +393,20 @@ export default function MeetingRoom({ isAdmin, roomCode: propRoomCode, userName:
   };
 
   const getParticipantName = (uid) => {
-    return participantNamesRef.current[uid]?.name || `User ${uid}`;
+    return participantNamesRef.current[uid]
+      ? participantNamesRef.current[uid].name
+      : 'User ' + uid;
   };
 
   const isParticipantAdmin = (uid) => {
-    return uid === 1 || participantNamesRef.current[uid]?.isAdmin;
+    return (
+      uid === 1 ||
+      (participantNamesRef.current[uid] && participantNamesRef.current[uid].isAdmin)
+    );
   };
 
   const totalParticipants = 1 + remoteUsers.length;
 
-  // Pre-meeting admin view
   if (isAdmin && !meetingActive) {
     return (
       <div className="min-h-screen flex items-center justify-center px-4">
@@ -440,7 +446,6 @@ export default function MeetingRoom({ isAdmin, roomCode: propRoomCode, userName:
 
   return (
     <div className="h-screen flex flex-col bg-dark overflow-hidden">
-      {/* Top bar */}
       <motion.div
         initial={{ y: -20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
@@ -497,20 +502,17 @@ export default function MeetingRoom({ isAdmin, roomCode: propRoomCode, userName:
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
             </svg>
             Chat
-            {messages.length > 0 && (
-              <span className="w-2 h-2 bg-accent rounded-full" />
-            )}
+            {messages.length > 0 && <span className="w-2 h-2 bg-accent rounded-full" />}
           </button>
         </div>
       </motion.div>
 
-      {/* Main content */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Video grid */}
         <div className="flex-1 p-3 overflow-auto">
           <div
-            className={`grid gap-3 h-full auto-rows-fr ${
-              totalParticipants === 1
+            className={
+              'grid gap-3 h-full auto-rows-fr ' +
+              (totalParticipants === 1
                 ? 'grid-cols-1'
                 : totalParticipants === 2
                 ? 'grid-cols-1 md:grid-cols-2'
@@ -520,22 +522,10 @@ export default function MeetingRoom({ isAdmin, roomCode: propRoomCode, userName:
                 ? 'grid-cols-2 md:grid-cols-3'
                 : totalParticipants <= 9
                 ? 'grid-cols-3'
-                : 'grid-cols-3 md:grid-cols-4'
-            }`}
+                : 'grid-cols-3 md:grid-cols-4')
+            }
           >
-            {/* Admin / Local tile (bigger for admin) */}
-            <motion.div
-              layout
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className={`${
-                isAdmin || (!isAdmin && totalParticipants > 1)
-                  ? isAdmin
-                    ? 'col-span-1 row-span-1 md:col-span-1 md:row-span-1'
-                    : ''
-                  : ''
-              }`}
-            >
+            <motion.div layout initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}>
               <VideoPlayer
                 videoTrack={localVideoTrackRef.current}
                 uid={localUid}
@@ -547,11 +537,9 @@ export default function MeetingRoom({ isAdmin, roomCode: propRoomCode, userName:
               />
             </motion.div>
 
-            {/* Remote users */}
             {remoteUsers.map((user) => {
               const name = getParticipantName(user.uid);
               const userIsAdmin = isParticipantAdmin(user.uid);
-
               return (
                 <motion.div
                   key={user.uid}
@@ -560,9 +548,7 @@ export default function MeetingRoom({ isAdmin, roomCode: propRoomCode, userName:
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.9 }}
                   className={
-                    userIsAdmin
-                      ? 'col-span-1 row-span-1 md:col-span-2 md:row-span-2 order-first'
-                      : ''
+                    userIsAdmin ? 'col-span-1 row-span-1 md:col-span-2 md:row-span-2 order-first' : ''
                   }
                 >
                   <VideoPlayer
@@ -581,7 +567,6 @@ export default function MeetingRoom({ isAdmin, roomCode: propRoomCode, userName:
           </div>
         </div>
 
-        {/* Side panels */}
         <AnimatePresence>
           {showChat && (
             <motion.div
@@ -626,7 +611,6 @@ export default function MeetingRoom({ isAdmin, roomCode: propRoomCode, userName:
         </AnimatePresence>
       </div>
 
-      {/* Controls bar */}
       <Controls
         isMicOn={isMicOn}
         isCamOn={isCamOn}
@@ -642,4 +626,3 @@ export default function MeetingRoom({ isAdmin, roomCode: propRoomCode, userName:
     </div>
   );
 }
-                 
